@@ -1,4 +1,4 @@
-# NodeBB container image — site-agnostic.
+# NodeBB container image
 #
 # Structure mirrors NodeBB's own Dockerfile, with two deliberate differences
 # documented at the VOLUME line and in the README.
@@ -11,25 +11,31 @@ FROM node:${NODE_VERSION} AS build
 # Bump this to upgrade NodeBB. CI derives every image tag from it, so the commit
 # that changes it is the commit that publishes the new version.
 ARG NODEBB_VERSION=v4.14.0
+ARG UID=1001
+ARG GID=1001
 
 # Space-separated npm package names, baked in at build time.
 #
-# EMPTY BY DEFAULT, and that is the point: the published image is vanilla NodeBB
-# and reusable by anyone. Baking a specific forum's plugin list into the default
-# would leak that forum's attack surface and break the agnostic premise. Build a
-# variant instead:
-#   docker build --build-arg PLUGINS="nodebb-plugin-foo nodebb-theme-bar" .
+# EMPTY BY DEFAULT, and that is the point: this published image is vanilla NodeBB.
+# For your specific needs you can build a variant instead:
+#
+#   docker build --build-arg PLUGINS="nodebb-plugin-foo@1.2.4 nodebb-theme-bar@2.0.0" .
+#
+# Pin versions. This layer is cached on the literal PLUGINS string, so against a
+# warm cache an unpinned name reinstalls the previously-resolved version and
+# silently misses updates; a pinned bump changes the string and rebuilds it.
 #
 # Baking at build time rather than using NODEBB_ADDITIONAL_PLUGINS means the
 # running container does not npm-install plugins on every start.
+# This is more in-line with how a Docker container should behave.
 ARG PLUGINS=""
 
 ENV NODE_ENV=production \
     DAEMON=false \
     SILENT=false \
     USER=nodebb \
-    UID=1001 \
-    GID=1001 \
+    UID=${UID} \
+    GID=${GID} \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
 WORKDIR /usr/src/app/
@@ -41,8 +47,18 @@ RUN corepack enable \
     && DEBIAN_FRONTEND=noninteractive apt-get -y --no-install-recommends install \
         tini git ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid ${GID} ${USER} \
-    && useradd --uid ${UID} --gid ${GID} --home-dir /usr/src/app/ --shell /bin/bash ${USER} \
+    && if getent group ${GID} >/dev/null; then \
+           groupmod -n ${USER} "$(getent group ${GID} | cut -d: -f1)"; \
+       else \
+           groupadd --gid ${GID} ${USER}; \
+       fi \
+    && if getent passwd ${UID} >/dev/null; then \
+           usermod -l ${USER} -g ${GID} -d /usr/src/app/ -s /bin/bash \
+               "$(getent passwd ${UID} | cut -d: -f1)"; \
+       else \
+           useradd --uid ${UID} --gid ${GID} --home-dir /usr/src/app/ \
+               --shell /bin/bash ${USER}; \
+       fi \
     && chown -R ${USER}:${USER} /usr/src/app/
 
 USER ${USER}
@@ -72,10 +88,12 @@ RUN if [ -n "${PLUGINS}" ]; then \
 FROM node:${NODE_VERSION}-slim AS final
 
 ARG NODEBB_VERSION=v4.14.0
+ARG UID=1001
+ARG GID=1001
 ARG PLUGINS=""
 
 LABEL org.opencontainers.image.title="nodebb" \
-      org.opencontainers.image.description="NodeBB forum, built from source at a pinned release" \
+      org.opencontainers.image.description="NodeBB forum, built from source" \
       org.opencontainers.image.source="https://github.com/xr09/nodebb-docker" \
       org.opencontainers.image.licenses="MIT" \
       org.nodebb.version="${NODEBB_VERSION}" \
@@ -85,8 +103,8 @@ ENV NODE_ENV=production \
     DAEMON=false \
     SILENT=false \
     USER=nodebb \
-    UID=1001 \
-    GID=1001 \
+    UID=${UID} \
+    GID=${GID} \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_AUDIT=false \
@@ -95,8 +113,18 @@ ENV NODE_ENV=production \
 WORKDIR /usr/src/app/
 
 RUN corepack enable \
-    && groupadd --gid ${GID} ${USER} \
-    && useradd --uid ${UID} --gid ${GID} --home-dir /usr/src/app/ --shell /bin/bash ${USER} \
+    && if getent group ${GID} >/dev/null; then \
+           groupmod -n ${USER} "$(getent group ${GID} | cut -d: -f1)"; \
+       else \
+           groupadd --gid ${GID} ${USER}; \
+       fi \
+    && if getent passwd ${UID} >/dev/null; then \
+           usermod -l ${USER} -g ${GID} -d /usr/src/app/ -s /bin/bash \
+               "$(getent passwd ${UID} | cut -d: -f1)"; \
+       else \
+           useradd --uid ${UID} --gid ${GID} --home-dir /usr/src/app/ \
+               --shell /bin/bash ${USER}; \
+       fi \
     && mkdir -p /usr/src/app/logs/ /opt/config/ \
     && chown -R ${USER}:${USER} /usr/src/app/ /opt/config/
 

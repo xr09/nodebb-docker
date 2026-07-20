@@ -161,9 +161,15 @@ plugins in, build a variant:
 
 ```bash
 docker build \
-  --build-arg PLUGINS="nodebb-plugin-markdown nodebb-theme-harmony" \
+  --build-arg PLUGINS="nodebb-plugin-markdown@3.1.0 nodebb-theme-harmony@1.2.0" \
   -t my-nodebb .
 ```
+
+**Pin plugin versions.** The plugin install is a cached layer keyed on the exact
+`PLUGINS` string, so against a warm build cache an unpinned name keeps installing
+the version it first resolved and silently misses updates. A pinned version bump
+changes the string, rebuilds only the plugin layer (the core install stays
+cached), and installs exactly that version.
 
 Baking at build time is preferred over NodeBB's `NODEBB_ADDITIONAL_PLUGINS`,
 which npm-installs on every container start.
