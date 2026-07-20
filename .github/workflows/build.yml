@@ -1,10 +1,19 @@
 name: build image and push to GHCR
 
 on:
+  # Skip doc-only changes
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   # Weekly rebuild so the node:lts base picks up security fixes
   schedule:
     - cron: "0 0 * * 0"
