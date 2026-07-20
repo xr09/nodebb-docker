@@ -26,8 +26,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      packages: write
+      contents: write   # tag repo
+      packages: write   # push to ghcr
 
     steps:
       - uses: actions/checkout@v4
@@ -79,3 +79,29 @@ jobs:
             ${{ env.IMAGE }}:${{ steps.version.outputs.minor }}
             ${{ env.IMAGE }}:${{ steps.version.outputs.major }}
             ${{ env.IMAGE }}:latest
+
+      # Tag the repo with the version we just published, so git tags track the
+      # released images. Only on push (a real release) — schedule/dispatch
+      # republish an already-tagged version, and PRs must not tag. Idempotent:
+      # a push that does not bump NODEBB_VERSION finds the tag present and skips,
+      # and the existing tag is never moved.
+      - name: Tag released version
+        if: github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = `v${{ steps.version.outputs.full }}`;
+            try {
+              await github.rest.git.getRef({
+                owner: context.repo.owner, repo: context.repo.repo,
+                ref: `tags/${tag}`,
+              });
+              core.info(`${tag} already exists — leaving it in place`);
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              await github.rest.git.createRef({
+                owner: context.repo.owner, repo: context.repo.repo,
+                ref: `refs/tags/${tag}`, sha: context.sha,
+              });
+              core.info(`Created ${tag} at ${context.sha}`);
+            }
