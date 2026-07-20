@@ -4,8 +4,9 @@ How to deploy, configure, upgrade, and build `nodebb-docker`. For what the image
 is and how tags work, see the [README](../README.md).
 
 - [Usage](#usage) — first-run compose setup
-  - [What does NOT work, and why](#what-does-not-work-and-why)
-- [Two things worth knowing before you run it](#two-things-worth-knowing-before-you-run-it)
+  - [What doesn't work](#what-doesnt-work)
+- [node_modules is not a volume](#node_modules-is-not-a-volume)
+- [Outbound network is required](#outbound-network-is-required)
 - [Plugins](#plugins)
 - [Redis as a session store](#redis-as-a-session-store)
 - [Upgrading NodeBB](#upgrading-nodebb)
@@ -13,15 +14,15 @@ is and how tags work, see the [README](../README.md).
 
 ## Usage
 
-NodeBB listens on **4567**. Volumes: `/opt/config`, `/usr/src/app/public/uploads`,
+NodeBB listens on 4567. Volumes: `/opt/config`, `/usr/src/app/public/uploads`,
 `/usr/src/app/build`.
 
-Getting a *first* run to work is the fiddly part, and the obvious approaches do
-not work — see below. This is the shape that does:
+First install is the awkward part; the obvious approaches don't work. This
+compose setup does:
 
 ```yaml
 services:
-  # Installs on first run and exits. Runs BEFORE the forum.
+  # Installs on first run and exits. Runs before the forum.
   setup:
     image: ghcr.io/xr09/nodebb-docker:4.14.0
     restart: 'no'
@@ -64,13 +65,13 @@ export CONFIG=/opt/config/config.json
 cd /usr/src/app && ./nodebb setup "$SETUP_JSON"
 ```
 
-with `SETUP_JSON` built from your environment using NodeBB's **colon** key form
-(`mongo:host`, `admin:username`), which is a different convention from the
-`mongo__host` env form used at runtime. A complete, working implementation is at
+with `SETUP_JSON` built from your environment using NodeBB's colon key form
+(`mongo:host`, `admin:username`) — a different convention from the `mongo__host`
+env form used at runtime. A complete implementation is at
 [`websites/foroguzzi/setup.sh`](https://github.com/xr09/orbit1) in the author's
 infrastructure repo.
 
-### What does NOT work, and why
+### What doesn't work
 
 **Setting the `SETUP` environment variable.** Upstream's entrypoint does:
 
@@ -78,30 +79,27 @@ infrastructure repo.
 if [ -n "$SETUP" ]; then exec /usr/src/app/nodebb setup --config="$config"; fi
 ```
 
-It passes `--config=<path to config.json>`, **not** the JSON. `nodebb setup`
-takes its config as a *positional* argument (`.command('setup [config]')`), so
-with `SETUP` set it runs **interactively** and blocks. And because it `exec`s,
-the container exits when setup ends — under `restart: unless-stopped` it then
-loops through setup forever.
+It passes `--config=<path to config.json>`, not the JSON. `nodebb setup` takes
+its config as a positional argument (`.command('setup [config]')`), so with
+`SETUP` set it runs interactively and blocks. And because it `exec`s, the
+container exits when setup ends — under `restart: unless-stopped` it loops
+through setup forever.
 
 **Supplying everything via environment variables and just starting.** The
-entrypoint chooses what to run by testing whether the config *file* exists:
+entrypoint chooses what to run by testing whether the config file exists:
 
 ```sh
 if [ -f "$CONFIG" ]; then start_forum ...; else nodebb install ...; fi
 ```
 
-It never consults nconf. Measured directly: with `url`, `secret`, `database` and
-the full mongo block all visible to nconf inside the container, NodeBB still
-logged *"Launching web installer on port 4567"* and sat there waiting for a
-browser.
+It never consults nconf: with `url`, `secret`, `database` and the full mongo
+block all visible to nconf inside the container, NodeBB still logged "Launching
+web installer on port 4567" and sat waiting for a browser.
 
-Environment variables are still the right way to configure the **running**
-forum — they just cannot get you past the first install.
+Environment variables are still the right way to configure the running forum —
+they just can't get you past the first install.
 
-## Two things worth knowing before you run it
-
-### 1. `node_modules` is deliberately not a volume
+## node_modules is not a volume
 
 Upstream's Dockerfile declares it:
 
@@ -109,27 +107,24 @@ Upstream's Dockerfile declares it:
 VOLUME ["/usr/src/app/node_modules", "/usr/src/app/build", ...]
 ```
 
-Docker then creates an anonymous volume from the image on first run — and on a
-**later image update that stale volume shadows the new image's `node_modules`**.
-Upgrade the image, and it silently keeps running the old dependencies and
-plugins while everything reports success.
+Docker then creates an anonymous volume from the image on first run, and on a
+later image update that stale volume shadows the new image's `node_modules`.
+Upgrade the image and it silently keeps running the old dependencies and plugins
+while everything reports success.
 
 This image omits `node_modules` from the VOLUME list, so it comes from the image
-and is correct by construction. **You do not need `--renew-anon-volumes`.**
+and is correct by construction. You do not need `--renew-anon-volumes`.
 
-If you are migrating from an image that did declare it, remove the old anonymous
-volume once or you will keep the stale copy.
+Migrating from an image that did declare it: remove the old anonymous volume
+once, or you'll keep the stale copy.
 
-### 2. The container needs outbound network access
+## Outbound network is required
 
-NodeBB's entrypoint (`install_dependencies()`) runs `npm install`
-unconditionally on **every start**, so the container expects to reach the npm
-registry at runtime. This is upstream behaviour and is not patched here —
-maintaining a fork of the entrypoint across NodeBB releases costs more than it
-saves.
+NodeBB's entrypoint (`install_dependencies()`) runs `npm install` on every start,
+so the container expects to reach the npm registry at runtime. Upstream
+behaviour, not patched here.
 
-Plan for it: give the NodeBB container an egress path. Its database containers
-do not need one.
+Give the NodeBB container an egress path; its databases don't need one.
 
 ## Plugins
 
@@ -166,11 +161,11 @@ another database stays primary — from `src/database/index.js`:
 
 **But `nodebb setup` does not persist it.** It writes only `url`, `secret`,
 `database`, `port` and the primary database block into config.json, and drops the
-redis one. Measured: `sess:*` keys appear in Redis while config.json contains no
-redis block at all.
+redis one: `sess:*` keys appear in Redis while config.json contains no redis
+block at all.
 
-So supply `redis__host` / `redis__port` / `redis__password` as **environment
-variables** on the forum container. Removing them later on the assumption that
+So supply `redis__host` / `redis__port` / `redis__password` as environment
+variables on the forum container. Removing them later on the assumption that
 config.json holds them silently moves sessions back to the primary database —
 the forum keeps working, so nothing flags it.
 

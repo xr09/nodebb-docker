@@ -36,16 +36,11 @@ tag, so `latest` can change without any commit here.
 
 ## Documentation
 
-Deployment and operational how-tos live in **[docs/USAGE.md](docs/USAGE.md)**:
+Deployment, configuration, upgrades, and local builds: **[docs/USAGE.md](docs/USAGE.md)**.
 
-- **[Usage](docs/USAGE.md#usage)** — the first-run compose setup (and why the
-  obvious approaches don't work)
-- **[Two things worth knowing before you run it](docs/USAGE.md#two-things-worth-knowing-before-you-run-it)**
-  — `node_modules` is not a volume; the container needs egress
-- **[Plugins](docs/USAGE.md#plugins)** — building a variant with plugins baked in
-- **[Redis as a session store](docs/USAGE.md#redis-as-a-session-store)**
-- **[Upgrading NodeBB](docs/USAGE.md#upgrading-nodebb)**
-- **[Building locally](docs/USAGE.md#building-locally)**
+Two things that trip people up: `node_modules` is deliberately not a volume, and
+first-run install can't be done through environment variables alone — both
+covered there.
 
 ## License
 
