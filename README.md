@@ -25,9 +25,8 @@ tag, so `latest` can change without any commit here.
 
 Deployment, configuration, upgrades, and local builds: **[docs/USAGE.md](docs/USAGE.md)**.
 
-Two things that trip people up: `node_modules` is deliberately not a volume, and
-first-run install can't be done through environment variables alone — both
-covered there.
+Two things that could trip people up: `node_modules` is deliberately not a volume, and
+first-run install can't be done through environment variables alone — both covered there.
 
 ## License
 
