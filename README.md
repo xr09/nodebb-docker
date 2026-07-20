@@ -7,19 +7,6 @@ built from source at a pinned release.
 ghcr.io/xr09/nodebb-docker:4.14.0
 ```
 
-## Why this exists
-
-The published NodeBB images are years stale:
-
-| Image | Newest | |
-|---|---|---|
-| `nodebb/docker` (Docker Hub) | 1.19.12 | July **2023** |
-| `ghcr.io/nodebb/nodebb` | date tags | mid-**2024** |
-| NodeBB releases | 4.14.0 | July 2026 |
-
-This image tracks current releases and is deliberately **site-agnostic** — no
-forum-specific configuration, no baked plugin list.
-
 ## Tags
 
 Derived from `ARG NODEBB_VERSION` in the Dockerfile:
