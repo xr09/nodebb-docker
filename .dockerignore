@@ -1,0 +1,7 @@
+# The build context is only ever this repo's own metadata — NodeBB itself is
+# cloned inside the Dockerfile — so almost everything here is noise that would
+# only serve to invalidate the build cache.
+.git
+.github
+*.md
+LICENSE

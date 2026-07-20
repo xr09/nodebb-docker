@@ -1,0 +1,72 @@
+name: build image and push to GHCR
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Weekly rebuild so the node:lts base picks up security fixes
+  schedule:
+    - cron: "0 0 * * 0"
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/nodebb-docker
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Read the pinned NodeBB version out of the Dockerfile so the image tags
+      # and the ARG cannot drift. Bumping NodeBB is then a one-line edit and the
+      # tags follow automatically.
+      - name: Derive version tags
+        id: version
+        run: |
+          set -euo pipefail
+          full="$(grep -m1 '^ARG NODEBB_VERSION=' Dockerfile | cut -d= -f2)"
+          full="${full#v}"                    # 4.14.0
+          minor="${full%.*}"                  # 4.14
+          major="${minor%.*}"                 # 4
+          echo "full=$full"   >> "$GITHUB_OUTPUT"
+          echo "minor=$minor" >> "$GITHUB_OUTPUT"
+          echo "major=$major" >> "$GITHUB_OUTPUT"
+          echo "Building NodeBB $full (tags: $full, $minor, $major, latest)"
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v3.8.0
+
+      # Skipped on pull_request: PRs from forks get a read-only token, and a PR
+      # should prove the image builds without publishing anything.
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6.10.0
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          context: ./
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          pull: true
+          cache-from: type=registry,ref=${{ env.IMAGE }}:latest
+          cache-to: type=inline
+          provenance: false
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.version.outputs.full }}
+            ${{ env.IMAGE }}:${{ steps.version.outputs.minor }}
+            ${{ env.IMAGE }}:${{ steps.version.outputs.major }}
+            ${{ env.IMAGE }}:latest

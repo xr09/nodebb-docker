@@ -1,0 +1,4 @@
+# Nothing here is built locally into the repo — NodeBB is cloned inside the
+# Docker build — so this only covers editor and OS noise.
+*.swp
+.DS_Store
