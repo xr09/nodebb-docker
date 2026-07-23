@@ -10,7 +10,7 @@ FROM node:${NODE_VERSION} AS build
 
 # Bump this to upgrade NodeBB. CI derives every image tag from it, so the commit
 # that changes it is the commit that publishes the new version.
-ARG NODEBB_VERSION=v4.14.1
+ARG NODEBB_VERSION=v4.14.2
 ARG UID=1001
 ARG GID=1001
 
@@ -87,7 +87,7 @@ RUN if [ -n "${PLUGINS}" ]; then \
 # --- final ------------------------------------------------------------------
 FROM node:${NODE_VERSION}-slim AS final
 
-ARG NODEBB_VERSION=v4.14.1
+ARG NODEBB_VERSION=v4.14.2
 ARG UID=1001
 ARG GID=1001
 ARG PLUGINS=""
