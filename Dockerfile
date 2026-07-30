@@ -1,7 +1,8 @@
 # NodeBB container image
 #
-# Structure mirrors NodeBB's own Dockerfile, with two deliberate differences
-# documented at the VOLUME line and in the README.
+# Structure mirrors NodeBB's own Dockerfile. Two deliberate differences: our own
+# entrypoint, and node_modules is not a VOLUME. Both are documented where they
+# happen.
 
 ARG NODE_VERSION=24
 
@@ -10,14 +11,14 @@ FROM node:${NODE_VERSION} AS build
 
 # Bump this to upgrade NodeBB. CI derives every image tag from it, so the commit
 # that changes it is the commit that publishes the new version.
-ARG NODEBB_VERSION=v4.14.2
+ARG NODEBB_VERSION=v4.14.4
 ARG UID=1001
 ARG GID=1001
 
 # Space-separated npm package names, baked in at build time.
 #
-# EMPTY BY DEFAULT, and that is the point: this published image is vanilla NodeBB.
-# For your specific needs you can build a variant instead:
+# Empty by default: the published image is vanilla NodeBB. Plugin-bearing images
+# are a build-arg override:
 #
 #   docker build --build-arg PLUGINS="nodebb-plugin-foo@1.2.4 nodebb-theme-bar@2.0.0" .
 #
@@ -25,9 +26,8 @@ ARG GID=1001
 # warm cache an unpinned name reinstalls the previously-resolved version and
 # silently misses updates; a pinned bump changes the string and rebuilds it.
 #
-# Baking at build time rather than using NODEBB_ADDITIONAL_PLUGINS means the
-# running container does not npm-install plugins on every start.
-# This is more in-line with how a Docker container should behave.
+# This is the only way to add plugins here — the entrypoint installs nothing at
+# runtime and refuses NODEBB_ADDITIONAL_PLUGINS.
 ARG PLUGINS=""
 
 ENV NODE_ENV=production \
@@ -87,7 +87,7 @@ RUN if [ -n "${PLUGINS}" ]; then \
 # --- final ------------------------------------------------------------------
 FROM node:${NODE_VERSION}-slim AS final
 
-ARG NODEBB_VERSION=v4.14.2
+ARG NODEBB_VERSION=v4.14.4
 ARG UID=1001
 ARG GID=1001
 ARG PLUGINS=""
@@ -129,7 +129,13 @@ RUN corepack enable \
     && chown -R ${USER}:${USER} /usr/src/app/ /opt/config/
 
 COPY --from=build --chown=${USER}:${USER} /usr/src/app/ /usr/src/app/install/docker/setup.json /usr/src/app/
-COPY --from=build --chown=${USER}:${USER} /usr/bin/tini /usr/src/app/install/docker/entrypoint.sh /usr/local/bin/
+COPY --from=build --chown=${USER}:${USER} /usr/bin/tini /usr/local/bin/tini
+
+# Our entrypoint, replacing NodeBB's. Upstream's npm-installs on every boot and
+# prunes plugins baked into the image, so it is never put on PATH and never
+# executed — no fallback. It still ships in the tree from the COPY above, at
+# install/docker/entrypoint.sh, wired to nothing. Reasoning in entrypoint.sh.
+COPY --chown=${USER}:${USER} entrypoint.sh /usr/local/bin/entrypoint.sh
 
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/tini
 
@@ -137,20 +143,15 @@ USER ${USER}
 
 EXPOSE 4567
 
-# NOTE: `/usr/src/app/node_modules` is deliberately NOT declared here, and
-# upstream's Dockerfile does declare it.
+# `/usr/src/app/node_modules` is deliberately not declared here; upstream's
+# Dockerfile does declare it.
 #
 # A declared VOLUME makes Docker create an anonymous volume from the image on
-# first run. On a LATER image update that stale volume shadows the new image's
-# node_modules — so a rebuilt image with upgraded dependencies or new plugins
-# silently keeps running the old ones, while every surface says the deploy
-# succeeded. (Same shape as postgres:18 moving PGDATA: the container works and
-# quietly ignores the thing you changed.)
-#
-# Omitting it means node_modules comes from the image and is correct by
-# construction, so consumers need no `--renew-anon-volumes` workaround. The
-# trade-off is that runtime `npm install` writes to the container layer rather
-# than a volume, which is what we want for an immutable image.
+# first run. On a later image update that stale volume shadows the new image's
+# node_modules, so a rebuild with upgraded dependencies or new plugins keeps
+# running the old ones while every surface reports the deploy succeeded. Same
+# shape as postgres:18 moving PGDATA. Omitting it means node_modules comes from
+# the image and is correct by construction — no `--renew-anon-volumes` needed.
 #
 # The three below are genuine state and must persist:
 #   build          - compiled client assets, regenerated on upgrade
