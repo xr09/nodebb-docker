@@ -1,0 +1,115 @@
+# Example deployment.
+#
+#   cp .env.example .env     # then edit it, at minimum the passwords
+#   docker compose up -d
+#   docker compose logs -f nodebb
+#
+# With plugins baked in:
+#
+#   docker build --build-arg PLUGINS="nodebb-plugin-foo@1.2.3" -t my-nodebb .
+#   NODEBB_IMAGE=my-nodebb docker compose up -d
+#
+# Deployment notes: docs/USAGE.md
+
+# Not `nodebb`: that is the project name a NodeBB source checkout gets, and the
+# volumes would collide.
+name: nodebb-docker
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env}
+      # Init scripts run against this database, so the user below is created in
+      # it rather than in `admin`. NodeBB sets no authSource, so the driver
+      # authenticates against the database in the URI path — a root user in
+      # `admin` would not work here.
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-nodebb}
+    configs:
+      - source: mongo-init
+        target: /docker-entrypoint-initdb.d/10-nodebb-user.js
+    volumes:
+      - nodebb-mongo:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', 'db.adminCommand("ping").ok']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # Installs on first run and exits. Skips itself if config.json already exists,
+  # so it is a no-op on every later `up`.
+  setup:
+    image: ${NODEBB_IMAGE:-ghcr.io/xr09/nodebb-docker:4.14.4}
+    restart: 'no'
+    depends_on:
+      mongo: { condition: service_healthy }
+    environment:
+      CONFIG: /opt/config/config.json
+      # setup.sh turns these into the colon key form (mongo:host) that
+      # `nodebb setup` takes positionally — not the mongo__host form below.
+      NODEBB_URL: ${NODEBB_URL:-http://localhost:4567}
+      NODEBB_SECRET: ${NODEBB_SECRET:?set NODEBB_SECRET in .env}
+      MONGO_HOST: mongo
+      MONGO_PORT: '27017'
+      MONGO_USERNAME: ${MONGO_USERNAME:-nodebb}
+      MONGO_PASSWORD: ${MONGO_PASSWORD:?set MONGO_PASSWORD in .env}
+      MONGO_DATABASE: ${MONGO_DATABASE:-nodebb}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+    volumes:
+      - nodebb-config:/opt/config
+      - nodebb-build:/usr/src/app/build
+      # Setup writes the default favicon into uploads/system; without this mount
+      # it lands on the container layer and is lost when setup exits.
+      - nodebb-uploads:/usr/src/app/public/uploads
+      - ./setup.sh:/setup.sh:ro
+    entrypoint: ['/bin/bash', '/setup.sh']
+
+  nodebb:
+    image: ${NODEBB_IMAGE:-ghcr.io/xr09/nodebb-docker:4.14.4}
+    restart: unless-stopped
+    depends_on:
+      mongo: { condition: service_healthy }
+      setup: { condition: service_completed_successfully }
+    ports:
+      - '${NODEBB_PORT:-4567}:4567'
+    environment:
+      # nconf is wired as nconf.env({separator:'__'}), so `mongo__host` becomes
+      # mongo.host. Lowercase names are not a typo — nconf reads env keys
+      # verbatim and NodeBB's config keys are lowercase.
+      url: ${NODEBB_URL:-http://localhost:4567}
+      secret: ${NODEBB_SECRET}
+      # Always 4567 inside the container; NODEBB_PORT only moves the host side.
+      # Explicit because `nodebb setup` otherwise copies the port out of `url`.
+      port: '4567'
+      database: mongo
+      mongo__host: mongo
+      mongo__port: '27017'
+      mongo__username: ${MONGO_USERNAME:-nodebb}
+      mongo__password: ${MONGO_PASSWORD}
+      mongo__database: ${MONGO_DATABASE:-nodebb}
+    volumes:
+      - nodebb-config:/opt/config
+      - nodebb-uploads:/usr/src/app/public/uploads
+      - nodebb-build:/usr/src/app/build
+      # node_modules is deliberately absent. Mounting it would shadow the image's
+      # copy on the next upgrade — see docs/USAGE.md#node_modules-is-not-a-volume.
+
+configs:
+  mongo-init:
+    content: |
+      db.createUser({
+        user: "${MONGO_USERNAME:-nodebb}",
+        pwd: "${MONGO_PASSWORD}",
+        roles: [{ role: "readWrite", db: "${MONGO_DATABASE:-nodebb}" }]
+      });
+
+volumes:
+  nodebb-config:
+  nodebb-uploads:
+  nodebb-build:
+  nodebb-mongo:

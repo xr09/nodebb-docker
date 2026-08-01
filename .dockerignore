@@ -5,3 +5,10 @@
 .github
 *.md
 LICENSE
+
+# Deployment example. setup.sh is bind-mounted by compose, never baked in, and
+# .env would be secrets in the build context.
+compose.yaml
+setup.sh
+.env
+.env.example

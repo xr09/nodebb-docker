@@ -1,70 +1,42 @@
-# NodeBB container image
-#
-# Structure mirrors NodeBB's own Dockerfile. Two deliberate differences: our own
-# entrypoint, and node_modules is not a VOLUME. Both are documented where they
-# happen.
+# NodeBB container image. Two stages: clone and install, then a slim runtime.
 
 ARG NODE_VERSION=24
 
 # --- build ------------------------------------------------------------------
 FROM node:${NODE_VERSION} AS build
 
-# Bump this to upgrade NodeBB. CI derives every image tag from it, so the commit
-# that changes it is the commit that publishes the new version.
+# Bump to upgrade NodeBB. CI derives every image tag from it.
 ARG NODEBB_VERSION=v4.14.4
-ARG UID=1001
-ARG GID=1001
 
-# Space-separated npm package names, baked in at build time.
-#
-# Empty by default: the published image is vanilla NodeBB. Plugin-bearing images
-# are a build-arg override:
+# Space-separated npm package names, baked in at build time:
 #
 #   docker build --build-arg PLUGINS="nodebb-plugin-foo@1.2.4 nodebb-theme-bar@2.0.0" .
 #
-# Pin versions. This layer is cached on the literal PLUGINS string, so against a
+# Pin versions. The layer is cached on the literal PLUGINS string, so against a
 # warm cache an unpinned name reinstalls the previously-resolved version and
-# silently misses updates; a pinned bump changes the string and rebuilds it.
-#
-# This is the only way to add plugins here — the entrypoint installs nothing at
-# runtime and refuses NODEBB_ADDITIONAL_PLUGINS.
+# silently misses updates.
 ARG PLUGINS=""
 
+# DAEMON and SILENT are runtime-only; this stage never starts NodeBB.
 ENV NODE_ENV=production \
-    DAEMON=false \
-    SILENT=false \
     USER=nodebb \
-    UID=${UID} \
-    GID=${GID} \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
 WORKDIR /usr/src/app/
 
-# corepack must be enabled as root — it writes shims into /usr/local/bin.
-# tini is copied into the final stage; git is needed for the clone below.
-RUN corepack enable \
-    && apt-get update \
+# tini is copied into the final stage; git is needed for the clone.
+RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get -y --no-install-recommends install \
         tini git ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && if getent group ${GID} >/dev/null; then \
-           groupmod -n ${USER} "$(getent group ${GID} | cut -d: -f1)"; \
-       else \
-           groupadd --gid ${GID} ${USER}; \
-       fi \
-    && if getent passwd ${UID} >/dev/null; then \
-           usermod -l ${USER} -g ${GID} -d /usr/src/app/ -s /bin/bash \
-               "$(getent passwd ${UID} | cut -d: -f1)"; \
-       else \
-           useradd --uid ${UID} --gid ${GID} --home-dir /usr/src/app/ \
-               --shell /bin/bash ${USER}; \
-       fi \
+    && groupadd --gid 1001 ${USER} \
+    && useradd --uid 1001 --gid 1001 \
+           --home-dir /usr/src/app/ --shell /bin/bash ${USER} \
     && chown -R ${USER}:${USER} /usr/src/app/
 
 USER ${USER}
 
-# Cloned rather than vendored, so this repo carries no copy of NodeBB to keep in
-# sync. --depth 1 on a tag: we want that release, not its history.
+# --depth 1 on a tag: that release, not its history.
 RUN git clone --depth 1 --branch ${NODEBB_VERSION} \
         https://github.com/NodeBB/NodeBB.git . \
     && rm -rf .git
@@ -88,8 +60,6 @@ RUN if [ -n "${PLUGINS}" ]; then \
 FROM node:${NODE_VERSION}-slim AS final
 
 ARG NODEBB_VERSION=v4.14.4
-ARG UID=1001
-ARG GID=1001
 ARG PLUGINS=""
 
 LABEL org.opencontainers.image.title="nodebb" \
@@ -103,8 +73,6 @@ ENV NODE_ENV=production \
     DAEMON=false \
     SILENT=false \
     USER=nodebb \
-    UID=${UID} \
-    GID=${GID} \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_AUDIT=false \
@@ -112,29 +80,27 @@ ENV NODE_ENV=production \
 
 WORKDIR /usr/src/app/
 
-RUN corepack enable \
-    && if getent group ${GID} >/dev/null; then \
-           groupmod -n ${USER} "$(getent group ${GID} | cut -d: -f1)"; \
-       else \
-           groupadd --gid ${GID} ${USER}; \
-       fi \
-    && if getent passwd ${UID} >/dev/null; then \
-           usermod -l ${USER} -g ${GID} -d /usr/src/app/ -s /bin/bash \
-               "$(getent passwd ${UID} | cut -d: -f1)"; \
-       else \
-           useradd --uid ${UID} --gid ${GID} --home-dir /usr/src/app/ \
-               --shell /bin/bash ${USER}; \
-       fi \
+# Nothing consumes these; they exist so an override fails the build instead of
+# being silently ignored. Do not delete them.
+ARG UID=1001
+ARG GID=1001
+RUN { [ "${UID}" = 1001 ] && [ "${GID}" = 1001 ] || { \
+          echo "Error: UID/GID are fixed at 1001 and cannot be overridden." >&2; \
+          echo "       Bind mounts are unsupported; named volumes take their" >&2; \
+          echo "       ownership from the image, leaving nothing to align with." >&2; \
+          exit 1; \
+      } ; } \
+    && groupadd --gid 1001 ${USER} \
+    && useradd --uid 1001 --gid 1001 \
+           --home-dir /usr/src/app/ --shell /bin/bash ${USER} \
     && mkdir -p /usr/src/app/logs/ /opt/config/ \
     && chown -R ${USER}:${USER} /usr/src/app/ /opt/config/
 
 COPY --from=build --chown=${USER}:${USER} /usr/src/app/ /usr/src/app/install/docker/setup.json /usr/src/app/
 COPY --from=build --chown=${USER}:${USER} /usr/bin/tini /usr/local/bin/tini
 
-# Our entrypoint, replacing NodeBB's. Upstream's npm-installs on every boot and
-# prunes plugins baked into the image, so it is never put on PATH and never
-# executed — no fallback. It still ships in the tree from the COPY above, at
-# install/docker/entrypoint.sh, wired to nothing. Reasoning in entrypoint.sh.
+# Ours, not NodeBB's. Upstream's still ships in the tree from the COPY above, at
+# install/docker/entrypoint.sh, but is never on PATH and never executed.
 COPY --chown=${USER}:${USER} entrypoint.sh /usr/local/bin/entrypoint.sh
 
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/tini
@@ -143,17 +109,9 @@ USER ${USER}
 
 EXPOSE 4567
 
-# `/usr/src/app/node_modules` is deliberately not declared here; upstream's
-# Dockerfile does declare it.
+# node_modules is deliberately absent, though upstream declares it — a stale
+# anonymous volume would shadow the new one on every image update.
 #
-# A declared VOLUME makes Docker create an anonymous volume from the image on
-# first run. On a later image update that stale volume shadows the new image's
-# node_modules, so a rebuild with upgraded dependencies or new plugins keeps
-# running the old ones while every surface reports the deploy succeeded. Same
-# shape as postgres:18 moving PGDATA. Omitting it means node_modules comes from
-# the image and is correct by construction — no `--renew-anon-volumes` needed.
-#
-# The three below are genuine state and must persist:
 #   build          - compiled client assets, regenerated on upgrade
 #   public/uploads - user-uploaded files
 #   /opt/config    - config.json, written at first-run setup

@@ -1,4 +1,6 @@
 # Nothing here is built locally into the repo — NodeBB is cloned inside the
-# Docker build — so this only covers editor and OS noise.
+# Docker build — so this is editor and OS noise, plus the one file that carries
+# real secrets. Only .env.example is committed.
 *.swp
 .DS_Store
+.env

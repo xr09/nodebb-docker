@@ -1,12 +1,17 @@
 # Usage guide
 
 How to deploy, configure, upgrade, and build `nodebb-docker`. For what the image
-is and how tags work, see the [README](../README.md).
+is and how tags work, see the [README](../README.md). For why it behaves the way
+it does — what NodeBB writes where, and which of its features need the filesystem
+— see [NODEBB-IN-DOCKER.md](NODEBB-IN-DOCKER.md).
 
 - [Usage](#usage) — first-run compose setup
+  - [Why there is a separate setup service](#why-there-is-a-separate-setup-service)
+  - [The URL's port becomes the listen port](#the-urls-port-becomes-the-listen-port)
   - [What doesn't work](#what-doesnt-work)
 - [node_modules is not a volume](#node_modules-is-not-a-volume)
 - [Nothing is installed at runtime](#nothing-is-installed-at-runtime)
+  - [Outbound network](#outbound-network)
 - [Migrating from the published image](#migrating-from-the-published-image)
 - [Recommended config.json settings](#recommended-configjson-settings)
 - [Plugins](#plugins)
@@ -19,59 +24,59 @@ is and how tags work, see the [README](../README.md).
 NodeBB listens on 4567. Volumes: `/opt/config`, `/usr/src/app/public/uploads`,
 `/usr/src/app/build`.
 
-First install is the awkward part; the obvious approaches don't work. This
-compose setup does:
-
-```yaml
-services:
-  # Installs on first run and exits. Runs before the forum.
-  setup:
-    image: ghcr.io/xr09/nodebb-docker:4.14.0
-    restart: 'no'
-    depends_on: { mongo: { condition: service_healthy } }
-    environment:
-      CONFIG: /opt/config/config.json
-    volumes:
-      - nodebb-config:/opt/config
-      - nodebb-build:/usr/src/app/build
-      - ./setup.sh:/setup.sh:ro
-    entrypoint: ['/bin/bash', '/setup.sh']
-
-  nodebb:
-    image: ghcr.io/xr09/nodebb-docker:4.14.0
-    restart: unless-stopped
-    depends_on:
-      setup: { condition: service_completed_successfully }
-    environment:
-      # nconf is wired as nconf.env({separator:'__'}), so `mongo__host` becomes
-      # mongo.host. Lowercase names are not a typo — nconf reads env keys
-      # verbatim and NodeBB's config keys are lowercase.
-      url: https://forum.example.com
-      secret: <random>
-      database: mongo
-      mongo__host: mongo
-      mongo__port: '27017'
-      mongo__username: nodebb
-      mongo__password: <secret>
-      mongo__database: nodebb
-    volumes:
-      - nodebb-config:/opt/config
-      - nodebb-uploads:/usr/src/app/public/uploads
-      - nodebb-build:/usr/src/app/build
-```
-
-where `setup.sh` skips if `config.json` exists and otherwise runs
+[`compose.yaml`](../compose.yaml) in this repo is a working stack — Mongo, a
+one-shot install service, and the forum:
 
 ```bash
-export CONFIG=/opt/config/config.json
-cd /usr/src/app && ./nodebb setup "$SETUP_JSON"
+cp .env.example .env    # edit it, at minimum the passwords
+docker compose up -d
 ```
 
-with `SETUP_JSON` built from your environment using NodeBB's colon key form
-(`mongo:host`, `admin:username`) — a different convention from the `mongo__host`
-env form used at runtime. A complete implementation is at
-[`websites/foroguzzi/setup.sh`](https://github.com/xr09/orbit1) in the author's
-infrastructure repo.
+To run a variant with plugins baked in, build it and point `NODEBB_IMAGE` at it:
+
+```bash
+docker build --build-arg PLUGINS="nodebb-plugin-foo@1.2.3" -t my-nodebb .
+NODEBB_IMAGE=my-nodebb docker compose up -d
+```
+
+### Why there is a separate setup service
+
+First install is the awkward part, and it cannot be folded into the forum
+container: something has to write `config.json` once, before the forum starts.
+[What doesn't work](#what-doesnt-work) covers the two obvious approaches and why
+neither does. That is the whole job of the `setup` service, which exits when it
+is done and skips itself on every later `up`.
+
+[`setup.sh`](../setup.sh) builds the JSON and runs:
+
+```bash
+cd /usr/src/app && ./nodebb setup "$SETUP_JSON" --config=/opt/config/config.json
+```
+
+`SETUP_JSON` uses NodeBB's colon key form (`mongo:host`, `admin:username`), a
+different convention from the `mongo__host` double-underscore env form the
+running forum uses. The script builds it with `node` rather than string
+concatenation, so a password containing a quote or backslash still produces valid
+JSON.
+
+### The URL's port becomes the listen port
+
+`nodebb setup` copies the port out of `url` into `config.json` as `port`. Give it
+`url: https://forum.example.com:8080` and NodeBB will listen on **8080 inside the
+container**, where a port mapping of `8080:4567` is pointing at nothing. The forum
+starts, logs that it is ready, and nothing reaches it.
+
+`url` is the public address people type; `port` is what the process binds. In a
+container the second should never move, so set it explicitly:
+
+```yaml
+environment:
+  url: https://forum.example.com
+  port: '4567'
+```
+
+`compose.yaml` and `setup.sh` both pin it. Change the host side of the port
+mapping instead when you need a different external port.
 
 ### What doesn't work
 
@@ -123,6 +128,10 @@ and is correct by construction. You do not need `--renew-anon-volumes`.
 Migrating from an image that did declare it: remove the old anonymous volume
 once, or you'll keep the stale copy.
 
+What NodeBB writes at runtime, and why the remaining three volumes are the right
+set, is in
+[What NodeBB writes at runtime](NODEBB-IN-DOCKER.md#what-nodebb-writes-at-runtime).
+
 ## Nothing is installed at runtime
 
 **This image replaces NodeBB's entrypoint.** It does not `npm install` on boot,
@@ -139,7 +148,8 @@ image**, so it is worth stating plainly what stops working:
 
 Installing a plugin is a rebuild with a different `PLUGINS` build-arg. Plugin
 **activation** is unaffected — that is database state, not files, so the ACP's
-enable/disable toggles work normally.
+enable/disable toggles work normally. The split between the two is in
+[Plugins: install vs activate](NODEBB-IN-DOCKER.md#plugins-install-vs-activate).
 
 ### Why
 
@@ -181,17 +191,16 @@ empty, because the container runs with `--no-silent` and NodeBB writes to stdout
 instead — use `docker logs`. The ACP log viewer reads that file, so it shows
 nothing by design.
 
-> **`OVERRIDE_UPDATE_LOCK` is not a way to get this behaviour from upstream's
-> entrypoint.** It reads like the fix — force the image's `package.json` over the
-> volume's — and it crash-loops the container. `copy_or_link_files()` ends by
-> symlinking source onto destination, so from the second start its seeding `cp`
-> copies a file onto itself, fails, and `set -e` exits 1. A fresh container
-> filesystem works, so it survives the deploy that introduces it and breaks on
-> the next plain restart or host reboot.
-
 `nodebb upgrade` still runs when the image's NodeBB version moves, gated on the
 md5 of `install/package.json` — restricted to `-s -b` (schema and assets), the
-parts that act on persistent state.
+parts that act on persistent state. What the other three flags would do, and why
+a bare `nodebb upgrade` defeats the design, is in
+[Upgrade flags](NODEBB-IN-DOCKER.md#upgrade-flags).
+
+Reaching for `OVERRIDE_UPDATE_LOCK` to get this behaviour out of upstream's
+entrypoint instead does not work — it crash-loops the container, for the reason
+in
+[OVERRIDE_UPDATE_LOCK](NODEBB-IN-DOCKER.md#override_update_lock-does-not-make-the-image-authoritative).
 
 ## Migrating from the published image
 
@@ -235,6 +244,9 @@ or reset to `harmony` and pick again from the admin panel:
 ```bash
 docker compose run --rm nodebb /usr/src/app/nodebb reset -t --config=/opt/config/config.json
 ```
+
+Why a missing theme exits where a missing plugin only warns:
+[Themes: why they are not plugins](NODEBB-IN-DOCKER.md#themes-why-they-are-not-plugins).
 
 ## Recommended config.json settings
 
@@ -307,5 +319,19 @@ step, which the entrypoint performs against the existing database.
 docker build -t nodebb-docker:dev .
 docker build --build-arg NODEBB_VERSION=v4.13.0 -t nodebb-docker:4.13.0 .
 ```
+
+`NODEBB_VERSION` and `PLUGINS` are the only build-args. `UID` and `GID` used to
+work and now fail the build on purpose:
+
+```
+Error: UID/GID are fixed at 1001 and cannot be overridden.
+```
+
+Overriding them was only ever useful for writable bind mounts, which this image
+does not support — named volumes take their ownership from the image, so there is
+nothing to align a UID with. The build refuses rather than ignores because
+BuildKit says nothing about build-args it never consumed, so accepting the flag
+would produce an image that silently runs as 1001 anyway and fails much later, as
+a permission error on a volume.
 
 amd64 only in CI. Add `linux/arm64` to `platforms` in the workflow if you need it.
