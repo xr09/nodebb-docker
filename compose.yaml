@@ -1,13 +1,11 @@
-# Example deployment.
+# Example deployment, building the image from this repo.
 #
 #   cp .env.example .env     # then edit it, at minimum the passwords
-#   docker compose up -d
+#   docker compose up -d --build
 #   docker compose logs -f nodebb
 #
-# With plugins baked in:
-#
-#   docker build --build-arg PLUGINS="nodebb-plugin-foo@1.2.3" -t my-nodebb .
-#   NODEBB_IMAGE=my-nodebb docker compose up -d
+# Plugins are baked in at build time: set PLUGINS in .env and rebuild. Without
+# --build, compose reuses whatever nodebb-docker:local already is.
 #
 # Deployment notes: docs/USAGE.md
 
@@ -15,9 +13,18 @@
 # volumes would collide.
 name: nodebb-docker
 
+# setup and nodebb are the same image. Defined once so it is built once and the
+# two services cannot drift apart.
+x-nodebb: &nodebb
+  build:
+    context: .
+    args:
+      PLUGINS: ${PLUGINS:-}
+  image: nodebb-docker:local
+
 services:
   mongo:
-    image: mongo:7
+    image: mongo:8.0
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
@@ -42,7 +49,7 @@ services:
   # Installs on first run and exits. Skips itself if config.json already exists,
   # so it is a no-op on every later `up`.
   setup:
-    image: ${NODEBB_IMAGE:-ghcr.io/xr09/nodebb-docker:4.14.4}
+    <<: *nodebb
     restart: 'no'
     depends_on:
       mongo: { condition: service_healthy }
@@ -70,7 +77,7 @@ services:
     entrypoint: ['/bin/bash', '/setup.sh']
 
   nodebb:
-    image: ${NODEBB_IMAGE:-ghcr.io/xr09/nodebb-docker:4.14.4}
+    <<: *nodebb
     restart: unless-stopped
     depends_on:
       mongo: { condition: service_healthy }

@@ -2,11 +2,11 @@
 
 ARG NODE_VERSION=24
 
-# --- build ------------------------------------------------------------------
-FROM node:${NODE_VERSION} AS build
-
-# Bump to upgrade NodeBB. CI derives every image tag from it.
-ARG NODEBB_VERSION=v4.14.4
+# Bump to upgrade NodeBB. CI derives every image tag from it, by grepping for
+# this line — so it has to stay the only one that assigns a value. Declared
+# before the first FROM to be global; each stage re-declares it bare, which
+# inherits this default without repeating it.
+ARG NODEBB_VERSION=v4.14.5
 
 # Space-separated npm package names, baked in at build time:
 #
@@ -15,7 +15,13 @@ ARG NODEBB_VERSION=v4.14.4
 # Pin versions. The layer is cached on the literal PLUGINS string, so against a
 # warm cache an unpinned name reinstalls the previously-resolved version and
 # silently misses updates.
+#
 ARG PLUGINS=""
+
+# --- build ------------------------------------------------------------------
+FROM node:${NODE_VERSION} AS build
+
+ARG NODEBB_VERSION
 
 # DAEMON and SILENT are runtime-only; this stage never starts NodeBB.
 ENV NODE_ENV=production \
@@ -34,7 +40,8 @@ RUN apt-get update \
            --home-dir /usr/src/app/ --shell /bin/bash ${USER} \
     && chown -R ${USER}:${USER} /usr/src/app/
 
-USER ${USER}
+# Numeric, so Kubernetes runAsNonRoot can enforce it without reading /etc/passwd.
+USER 1001
 
 # --depth 1 on a tag: that release, not its history.
 RUN git clone --depth 1 --branch ${NODEBB_VERSION} \
@@ -45,6 +52,12 @@ RUN git clone --depth 1 --branch ${NODEBB_VERSION} \
 RUN cp /usr/src/app/install/package.json /usr/src/app/package.json
 
 RUN npm install --omit=dev && rm -rf .npm
+
+# Declared here, not at the top of the stage: BuildKit invalidates every layer
+# below an ARG whose value changed, so a stage-top declaration made a PLUGINS
+# change re-run the clone and the core install too.
+# Keep this line under the core install.
+ARG PLUGINS
 
 # Separate layer so changing PLUGINS does not invalidate the (expensive) core
 # install above.
@@ -59,8 +72,8 @@ RUN if [ -n "${PLUGINS}" ]; then \
 # --- final ------------------------------------------------------------------
 FROM node:${NODE_VERSION}-slim AS final
 
-ARG NODEBB_VERSION=v4.14.4
-ARG PLUGINS=""
+ARG NODEBB_VERSION
+ARG PLUGINS
 
 LABEL org.opencontainers.image.title="nodebb" \
       org.opencontainers.image.description="NodeBB forum, built from source" \
@@ -105,9 +118,16 @@ COPY --chown=${USER}:${USER} entrypoint.sh /usr/local/bin/entrypoint.sh
 
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/tini
 
-USER ${USER}
+# Numeric, so Kubernetes runAsNonRoot can enforce it without reading /etc/passwd.
+USER 1001
 
 EXPOSE 4567
+
+# /api/v3/ping returns {"pong":true} with no auth and no database access. node,
+# because the slim base has no curl or wget. The long start period covers a first
+# boot, which compiles assets before it serves.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+    CMD ["node", "-e", "require('http').get('http://127.0.0.1:4567/api/v3/ping', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
 
 # node_modules is deliberately absent, though upstream declares it — a stale
 # anonymous volume would shadow the new one on every image update.

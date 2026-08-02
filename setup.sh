@@ -6,7 +6,7 @@
 # Why first install needs a separate service at all:
 # docs/USAGE.md#why-there-is-a-separate-setup-service
 
-set -e
+set -euo pipefail
 
 CONFIG="${CONFIG:-/opt/config/config.json}"
 

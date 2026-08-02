@@ -6,7 +6,7 @@
 # Step-by-step behaviour and the variables honoured below:
 # docs/NODEBB-IN-DOCKER.md, "What this image's entrypoint does".
 
-set -e
+set -euo pipefail
 
 CONFIG_DIR="${CONFIG_DIR:-/opt/config}"
 CONFIG="${CONFIG:-$CONFIG_DIR/config.json}"

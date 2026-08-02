@@ -4,7 +4,7 @@ A maintained container image for [NodeBB](https://github.com/NodeBB/NodeBB),
 built from source at a pinned release.
 
 ```
-ghcr.io/xr09/nodebb-docker:4.14.4
+ghcr.io/xr09/nodebb-docker:4.14.5
 ```
 
 ## Tags
@@ -13,13 +13,19 @@ Derived from `ARG NODEBB_VERSION` in the Dockerfile:
 
 | Tag | Moves |
 |---|---|
-| `4.14.4` | never — pin this in production |
+| `4.14.5` | never — pin this in production |
 | `4.14` | on patch releases |
 | `4` | on minor releases |
 | `latest` | every build |
 
 Pin the exact version. Weekly rebuilds refresh the base image underneath a given
 tag, so `latest` can change without any commit here.
+
+`4.14.5-plugins` and `latest-plugins` are the same image built with a plugin set
+this author's forum needs. They are separate tags on purpose: the tags above stay
+vanilla so the published image is reusable, and a plugin list in a public image
+advertises what a specific forum runs. Bake your own set instead — see
+[Plugins](docs/USAGE.md#plugins).
 
 ## The image installs nothing at runtime
 
@@ -39,12 +45,16 @@ first. A theme that isn't in the image stops the container from booting.
 ## Trying it
 
 [`compose.yaml`](compose.yaml) is a working stack — Mongo, a one-shot install
-service, and the forum:
+service, and the forum. It builds the image from the checkout rather than pulling
+a tag:
 
 ```bash
 cp .env.example .env    # edit it, at minimum the passwords
-docker compose up -d
+docker compose up -d --build
 ```
+
+The image carries a healthcheck, so `--wait` blocks until the forum is actually
+serving rather than merely running.
 
 ## Documentation
 

@@ -6,6 +6,7 @@ it does — what NodeBB writes where, and which of its features need the filesys
 — see [NODEBB-IN-DOCKER.md](NODEBB-IN-DOCKER.md).
 
 - [Usage](#usage) — first-run compose setup
+  - [Readiness](#readiness)
   - [Why there is a separate setup service](#why-there-is-a-separate-setup-service)
   - [The URL's port becomes the listen port](#the-urls-port-becomes-the-listen-port)
   - [What doesn't work](#what-doesnt-work)
@@ -25,19 +26,35 @@ NodeBB listens on 4567. Volumes: `/opt/config`, `/usr/src/app/public/uploads`,
 `/usr/src/app/build`.
 
 [`compose.yaml`](../compose.yaml) in this repo is a working stack — Mongo, a
-one-shot install service, and the forum:
+one-shot install service, and the forum. It builds the image from this checkout
+rather than pulling a published tag:
 
 ```bash
 cp .env.example .env    # edit it, at minimum the passwords
-docker compose up -d
+docker compose up -d --build
 ```
 
-To run a variant with plugins baked in, build it and point `NODEBB_IMAGE` at it:
+Baking plugins in is a `PLUGINS` line in `.env` followed by another
+`up -d --build`. Both services share one build definition, so they cannot end up
+on different images.
 
-```bash
-docker build --build-arg PLUGINS="nodebb-plugin-foo@1.2.3" -t my-nodebb .
-NODEBB_IMAGE=my-nodebb docker compose up -d
-```
+Without `--build`, compose reuses whatever `nodebb-docker:local` already is. To
+deploy a published tag instead, replace the `build:` block with
+`image: ghcr.io/xr09/nodebb-docker:4.14.5`.
+
+### Readiness
+
+The image declares a `HEALTHCHECK`, so `docker compose up -d --wait` returns only
+once the forum answers HTTP — not merely once the container is running. That
+distinction matters on a first start, which runs `nodebb upgrade -s -b` and
+compiles assets before it serves; a container without a healthcheck counts as
+ready immediately and anything downstream races it.
+
+The probe runs every 30s with a 120s start period, so failures while the forum is
+still coming up do not count against it — a first start typically fails three
+probes and then reports healthy. Orchestrators can use it directly, or point their
+own probes at the same endpoint —
+[`/api/v3/ping`](NODEBB-IN-DOCKER.md#readiness-probe).
 
 ### Why there is a separate setup service
 
@@ -282,8 +299,11 @@ Baking at build time is the *only* way here. NodeBB's
 refused with an error — see
 [Nothing is installed at runtime](#nothing-is-installed-at-runtime).
 
-The default is kept empty on purpose: a plugin list baked into a public image
-discloses the attack surface of whichever forum it was built for.
+For the same reason the `-plugins` tags are separate from the main ones. CI
+publishes `X.Y.Z-plugins` and `latest-plugins` carrying the set this author's
+forum runs, and passes `PLUGINS` from the workflow rather than changing the
+`ARG` — so the primary tags stay vanilla and `docker build .` still gives you a
+plain NodeBB. Treat those tags as someone else's build, not a base to adopt.
 
 ## Redis as a session store
 
@@ -307,8 +327,9 @@ the forum keeps working, so nothing flags it.
 
 ## Upgrading NodeBB
 
-Edit `ARG NODEBB_VERSION` in the Dockerfile, commit, push. CI derives all four
-tags from that value, so they cannot drift from what was actually built.
+Edit `ARG NODEBB_VERSION` in the Dockerfile, commit, push. CI reads that value
+back out of the Dockerfile and derives every tag from it — the four vanilla ones
+and the two `-plugins` ones — so they cannot drift from what was actually built.
 
 Read NodeBB's own upgrade notes first — major versions may need a schema upgrade
 step, which the entrypoint performs against the existing database.
@@ -334,4 +355,7 @@ BuildKit says nothing about build-args it never consumed, so accepting the flag
 would produce an image that silently runs as 1001 anyway and fails much later, as
 a permission error on a volume.
 
-amd64 only in CI. Add `linux/arm64` to `platforms` in the workflow if you need it.
+amd64 only in CI. Add `linux/arm64` to `platforms` in
+[`.github/workflows/build.yml`](../.github/workflows/build.yml) if you need it —
+NodeBB's `npm install` under QEMU turns a ~3 minute build into 20–40, and the
+weekly cron would pay that every time.
