@@ -15,7 +15,6 @@ ARG NODEBB_VERSION=v4.14.5
 # Pin versions. The layer is cached on the literal PLUGINS string, so against a
 # warm cache an unpinned name reinstalls the previously-resolved version and
 # silently misses updates.
-#
 ARG PLUGINS=""
 
 # --- build ------------------------------------------------------------------

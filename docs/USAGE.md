@@ -299,11 +299,12 @@ Baking at build time is the *only* way here. NodeBB's
 refused with an error — see
 [Nothing is installed at runtime](#nothing-is-installed-at-runtime).
 
-For the same reason the `-plugins` tags are separate from the main ones. CI
-publishes `X.Y.Z-plugins` and `latest-plugins` carrying the set this author's
-forum runs, and passes `PLUGINS` from the workflow rather than changing the
-`ARG` — so the primary tags stay vanilla and `docker build .` still gives you a
-plain NodeBB. Treat those tags as someone else's build, not a base to adopt.
+The `-plugins` tags are kept separate from the main ones so that the published
+image stays reusable. CI publishes `X.Y.Z-plugins` and `latest-plugins` carrying
+the set this author's forum runs, and passes `PLUGINS` from the workflow rather
+than changing the `ARG` — so the primary tags stay vanilla and `docker build .`
+still gives you a plain NodeBB. Treat those tags as someone else's build, not a
+base to adopt.
 
 ## Redis as a session store
 

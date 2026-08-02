@@ -23,9 +23,8 @@ tag, so `latest` can change without any commit here.
 
 `4.14.5-plugins` and `latest-plugins` are the same image built with a plugin set
 this author's forum needs. They are separate tags on purpose: the tags above stay
-vanilla so the published image is reusable, and a plugin list in a public image
-advertises what a specific forum runs. Bake your own set instead — see
-[Plugins](docs/USAGE.md#plugins).
+vanilla, so the published image is reusable by anyone. Bake your own set instead —
+see [Plugins](docs/USAGE.md#plugins).
 
 ## The image installs nothing at runtime
 
