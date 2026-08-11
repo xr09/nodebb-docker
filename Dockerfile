@@ -6,7 +6,7 @@ ARG NODE_VERSION=24
 # this line — so it has to stay the only one that assigns a value. Declared
 # before the first FROM to be global; each stage re-declares it bare, which
 # inherits this default without repeating it.
-ARG NODEBB_VERSION=v4.14.9
+ARG NODEBB_VERSION=v4.14.10
 
 # Space-separated npm package names, baked in at build time:
 #
