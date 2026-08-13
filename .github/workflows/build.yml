@@ -41,7 +41,7 @@ jobs:
             plugins: ""
             suffix: ""
           - variant: plugins
-            plugins: "nodebb-plugin-sso-google@4.0.0 nodebb-plugin-recent-cards@3.3.23"
+            plugins: "nodebb-plugin-sso-google@4.0.2 nodebb-plugin-recent-cards@3.3.23"
             suffix: "-plugins"
 
     steps:
