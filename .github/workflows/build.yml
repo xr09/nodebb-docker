@@ -80,7 +80,7 @@ jobs:
 
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v4.2.0
+        uses: docker/setup-buildx-action@v4.3.0
 
       # Skipped on pull_request: PRs from forks get a read-only token, and a PR
       # should prove the image builds without publishing anything.
