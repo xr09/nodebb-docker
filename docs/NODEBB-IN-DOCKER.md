@@ -242,11 +242,19 @@ wrapping it, and there is no fallback to it.
 2. Create the config directory and fail if it is not writable.
 3. List the themes baked into the image, because a missing one is fatal and
    nothing else in the log would name it.
-4. If `config.json` does not exist, hand off to `nodebb install` — the web
-   installer. This is the end of a clean first run; see
-   [What doesn't work](USAGE.md#what-doesnt-work) for why the config file, not
-   the environment, is what decides this.
-5. Otherwise compare the md5 of `install/package.json` against
+4. If `config.json` does not exist, run `nodebb install` — the web installer —
+   and wait for it. It exits 0 once setup completes; the entrypoint then checks
+   the file was written, records the upgrade hash (setup already built the
+   assets and initialised the schema for this image, so the gate below would
+   only build everything a second time), and carries on in the same container.
+   The installer would also spawn a detached `node loader.js` on completion,
+   with no `--config` and on the port about to be bound; `launchCmd=true` in its
+   environment turns that spawn into a no-op. The config file, not the
+   environment, decides this branch — see
+   [What doesn't work](USAGE.md#what-doesnt-work). With
+   `NODEBB_INIT_VERB=setup` and the `NODEBB_*` variables set, the same branch is
+   a prompt-free install: [Env-only first install](USAGE.md#env-only-first-install).
+5. Compare the md5 of `install/package.json` against
    `/opt/config/install_hash.md5`. On a difference run `nodebb upgrade -s -b`,
    then record the hash. Otherwise build only if `START_BUILD` is set.
 6. `exec npm start`.
@@ -256,8 +264,8 @@ wrapping it, and there is no fallback to it.
 | Variable | Default | Effect |
 |---|---|---|
 | `CONFIG_DIR` | `/opt/config` | Where `config.json` and the upgrade hash live |
-| `CONFIG` | `$CONFIG_DIR/config.json` | Config file path. Honoured, unlike upstream, which overwrites it |
-| `NODEBB_INIT_VERB` | `install` | Subcommand used when no config file exists |
+| `CONFIG` | `$CONFIG_DIR/config.json` | Config file path. Honoured, unlike upstream, which overwrites it. Exported by the entrypoint: `loader.js` reads it from the environment only, and `--config` on `npm start` never reaches the forum |
+| `NODEBB_INIT_VERB` | `install` | Subcommand used when no config file exists. `install` is the web installer; `setup` reads the `NODEBB_*` variables and installs without prompting |
 | `NODEBB_BUILD_VERB` | `build` | Subcommand used by `START_BUILD` |
 | `START_BUILD` | `false` | Rebuild assets on a start that is not an upgrade. `FORCE_BUILD_BEFORE_START` is accepted as an alias |
 | `NODEBB_ADDITIONAL_PLUGINS` | — | Refused with an error. Bake plugins in with the `PLUGINS` build-arg |
@@ -294,8 +302,12 @@ matter — what matters is that the route takes no authentication and touches no
 database, so it reports whether the web server is answering and nothing else.
 
 It runs through `node`, because the slim base image has no `curl`, `wget` or `nc`.
-The URL is hardcoded to `127.0.0.1:4567`; the container's listen port is pinned
-there, and only the host side of a port mapping ever moves.
+`healthcheck.js` reads `url` from the environment or `config.json` and probes
+under its path: NodeBB mounts every route under `relative_path`
+(`app.use(relativePath || '/', router)` in `src/routes/index.js`), so a forum at
+`https://example.com/forum` answers only `/forum/api/v3/ping`. Host and port are
+fixed at `127.0.0.1:4567`; the container's listen port is pinned there, and only
+the host side of a port mapping ever moves.
 
 ### Signal handling
 

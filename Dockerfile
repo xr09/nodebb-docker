@@ -113,7 +113,7 @@ COPY --from=build --chown=${USER}:${USER} /usr/bin/tini /usr/local/bin/tini
 
 # Ours, not NodeBB's. Upstream's still ships in the tree from the COPY above, at
 # install/docker/entrypoint.sh, but is never on PATH and never executed.
-COPY --chown=${USER}:${USER} entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=${USER}:${USER} entrypoint.sh healthcheck.js /usr/local/bin/
 
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/tini
 
@@ -123,10 +123,12 @@ USER 1001
 EXPOSE 4567
 
 # /api/v3/ping returns {"pong":true} with no auth and no database access. node,
-# because the slim base has no curl or wget. The long start period covers a first
-# boot, which compiles assets before it serves.
+# because the slim base has no curl or wget. The script derives the path from
+# `url`: NodeBB mounts everything under it, so a forum served from a subpath does
+# not answer at the root. The long start period covers a first boot, which
+# compiles assets before it serves.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
-    CMD ["node", "-e", "require('http').get('http://127.0.0.1:4567/api/v3/ping', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+    CMD ["node", "/usr/local/bin/healthcheck.js"]
 
 # node_modules is deliberately absent, though upstream declares it — a stale
 # anonymous volume would shadow the new one on every image update.

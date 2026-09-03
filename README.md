@@ -4,7 +4,7 @@ A maintained container image for [NodeBB](https://github.com/NodeBB/NodeBB),
 built from source at a pinned release.
 
 ```
-ghcr.io/xr09/nodebb-docker:4.14.5
+ghcr.io/xr09/nodebb-docker:4.15.2
 ```
 
 ## Tags
@@ -13,7 +13,7 @@ Derived from `ARG NODEBB_VERSION` in the Dockerfile:
 
 | Tag | Moves |
 |---|---|
-| `4.14.5` | never — pin this in production |
+| `4.15.2` | never — pin this in production |
 | `4.14` | on patch releases |
 | `4` | on minor releases |
 | `latest` | every build |
@@ -21,7 +21,7 @@ Derived from `ARG NODEBB_VERSION` in the Dockerfile:
 Pin the exact version. Weekly rebuilds refresh the base image underneath a given
 tag, so `latest` can change without any commit here.
 
-`4.14.5-plugins` and `latest-plugins` are the same image built with a plugin set
+`4.15.2-plugins` and `latest-plugins` are the same image built with a plugin set
 this author's forum needs. They are separate tags on purpose: the tags above stay
 vanilla, so the published image is reusable by anyone. Bake your own set instead —
 see [Plugins](docs/USAGE.md#plugins).

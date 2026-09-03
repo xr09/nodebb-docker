@@ -40,7 +40,7 @@ on different images.
 
 Without `--build`, compose reuses whatever `nodebb-docker:local` already is. To
 deploy a published tag instead, replace the `build:` block with
-`image: ghcr.io/xr09/nodebb-docker:4.14.5`.
+`image: ghcr.io/xr09/nodebb-docker:4.15.2`.
 
 ### Readiness
 
@@ -56,13 +56,20 @@ probes and then reports healthy. Orchestrators can use it directly, or point the
 own probes at the same endpoint —
 [`/api/v3/ping`](NODEBB-IN-DOCKER.md#readiness-probe).
 
+The probe takes its path from `url`. NodeBB mounts every route under that path,
+so a forum at `https://example.com/forum` answers `/forum/api/v3/ping` and 404s
+at the root; a probe of your own has to include the prefix too.
+
 ### Why there is a separate setup service
 
-First install is the awkward part, and it cannot be folded into the forum
-container: something has to write `config.json` once, before the forum starts.
-[What doesn't work](#what-doesnt-work) covers the two obvious approaches and why
-neither does. That is the whole job of the `setup` service, which exits when it
-is done and skips itself on every later `up`.
+Something has to write `config.json` once, before the forum starts. The `setup`
+service does that and nothing else: it exits when done and skips itself on every
+later `up`, which keeps the install step visible in the compose file and its
+outcome in `docker compose ps`. It is not the only way — the forum container can
+run the same non-interactive setup itself, see
+[Env-only first install](#env-only-first-install) — but it is the one this
+example uses. [What doesn't work](#what-doesnt-work) covers the two approaches
+that look like they should and do not.
 
 [`setup.sh`](../setup.sh) builds the JSON and runs:
 
@@ -112,19 +119,50 @@ through setup forever.
 This image does not implement `SETUP` at all, for that reason. Use the `setup.sh`
 init-service pattern above.
 
-**Supplying everything via environment variables and just starting.** The
-entrypoint chooses what to run by testing whether the config file exists:
+**Supplying the forum's runtime config via environment variables and just
+starting.** The entrypoint chooses what to run by testing whether the config file
+exists, never by consulting nconf:
 
 ```sh
 if [ -f "$CONFIG" ]; then start_forum ...; else nodebb install ...; fi
 ```
 
-It never consults nconf: with `url`, `secret`, `database` and the full mongo
-block all visible to nconf inside the container, NodeBB still logged "Launching
-web installer on port 4567" and sat waiting for a browser.
+With `url`, `secret`, `database` and the full mongo block all visible inside the
+container, NodeBB still logged "Launching web installer on port 4567" and sat
+waiting for a browser. Those variables configure the running forum; they are not
+setup input. Setup has its own set, below.
 
-Environment variables are still the right way to configure the running forum —
-they just can't get you past the first install.
+### Env-only first install
+
+`nodebb setup` reads its answers from `NODEBB_*` variables when it is given no
+JSON (`checkSetupFlagEnv()` in `src/install.js`): `NODEBB_URL`,
+`NODEBB_ADMIN_USERNAME`, `NODEBB_ADMIN_PASSWORD`, `NODEBB_ADMIN_EMAIL`,
+`NODEBB_DB`, and `NODEBB_DB_HOST`, `_PORT`, `_USER`, `_PASSWORD`, `_NAME`. All
+four admin values are required, or it exits without writing anything. The secret
+is generated. So the forum container can install itself:
+
+```yaml
+environment:
+  NODEBB_INIT_VERB: setup
+  NODEBB_URL: https://forum.example.com
+  NODEBB_ADMIN_USERNAME: admin
+  NODEBB_ADMIN_EMAIL: admin@example.com
+  NODEBB_ADMIN_PASSWORD: change-me
+  NODEBB_DB: mongo
+  NODEBB_DB_HOST: mongo
+  NODEBB_DB_PORT: '27017'
+  NODEBB_DB_USER: nodebb
+  NODEBB_DB_PASSWORD: change-me
+  NODEBB_DB_NAME: nodebb
+  port: '4567'
+```
+
+When `config.json` is missing the entrypoint runs setup, records the upgrade
+hash, and starts the forum in the same container. On every later start the file
+exists and the `NODEBB_*` variables are ignored. Two cautions: `NODEBB_PORT` is
+also read and becomes the listen port, so never pass the host-side port under
+that name; and with the default `NODEBB_INIT_VERB=install`, or any admin value
+missing, you get the web installer or an exit, not a prompt-free install.
 
 ## node_modules is not a volume
 

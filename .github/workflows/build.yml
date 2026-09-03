@@ -68,11 +68,23 @@ jobs:
             tags="$IMAGE:${full}${SUFFIX}"$'\n'"$IMAGE:latest${SUFFIX}"
           fi
 
+          # Layer cache, one ref per variant: the two legs run in parallel, and
+          # a shared ref would hold whichever finished last. The plugins leg also
+          # reads the vanilla ref, since the clone and core npm install are the
+          # same layers in both and PLUGINS only starts a later one.
+          cache_from="type=registry,ref=$IMAGE:buildcache"
+          if [ -n "$SUFFIX" ]; then
+            cache_from="$cache_from"$'\n'"type=registry,ref=$IMAGE:buildcache$SUFFIX"
+          fi
+
           echo "full=$full" >> "$GITHUB_OUTPUT"
           {
             echo "tags<<TAGS_EOF"
             echo "$tags"
             echo "TAGS_EOF"
+            echo "cache_from<<CACHE_EOF"
+            echo "$cache_from"
+            echo "CACHE_EOF"
           } >> "$GITHUB_OUTPUT"
 
           echo "Building NodeBB $full (${{ matrix.variant }}), tags:"
@@ -103,10 +115,11 @@ jobs:
           pull: true
           build-args: |
             PLUGINS=${{ matrix.plugins }}
-          # Both variants cache from the vanilla :latest. The expensive core
-          # `npm install` is the same layer in both; PLUGINS is a later layer.
-          cache-from: type=registry,ref=${{ env.IMAGE }}:latest
-          cache-to: type=inline
+          # mode=max exports the build stage's layers too. An inline cache holds
+          # only the final stage, so the clone and the core `npm install` were
+          # re-run on every build. Not exported on pull_request: no registry login.
+          cache-from: ${{ steps.version.outputs.cache_from }}
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}:buildcache{1},mode=max', env.IMAGE, matrix.suffix) || '' }}
           provenance: false
           tags: ${{ steps.version.outputs.tags }}
 

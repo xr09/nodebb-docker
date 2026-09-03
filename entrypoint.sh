@@ -9,7 +9,12 @@
 set -euo pipefail
 
 CONFIG_DIR="${CONFIG_DIR:-/opt/config}"
-CONFIG="${CONFIG:-$CONFIG_DIR/config.json}"
+# Exported, not just set: `npm start -- --config=...` is not enough. loader.js
+# resolves the config file from $CONFIG alone (`process.env.CONFIG ||
+# 'config.json'`) and forks app.js with no arguments, so without the export both
+# look for /usr/src/app/config.json, find nothing, and launch the web installer
+# on top of a fully installed forum.
+export CONFIG="${CONFIG:-$CONFIG_DIR/config.json}"
 NODEBB_INIT_VERB="${NODEBB_INIT_VERB:-install}"
 NODEBB_BUILD_VERB="${NODEBB_BUILD_VERB:-build}"
 START_BUILD="${START_BUILD:-${FORCE_BUILD_BEFORE_START:-false}}"
@@ -40,15 +45,28 @@ echo "Baked themes:${baked_themes:- none}"
 echo "  (a 'theme-not-found' exit means the active theme is not one of these — bake it"
 echo "   via PLUGINS, or fall back to harmony with: nodebb reset -t)"
 
-if [ ! -f "$CONFIG" ]; then
-  echo "Config file not found at $CONFIG"
-  echo "Starting installation session"
-  exec /usr/src/app/nodebb "$NODEBB_INIT_VERB" --config="$CONFIG"
-fi
-
 # install/package.json is baked in, so it moves only when the image does — which
 # is exactly when the schema migrations need to run.
 package_hash=$(md5sum /usr/src/app/install/package.json | head -c 32)
+
+if [ ! -f "$CONFIG" ]; then
+  echo "Config file not found at $CONFIG"
+  echo "Starting installation session"
+  # Not exec'd: the installer exits 0 once setup completes, and exec would take
+  # the container down with it. launchCmd=true replaces the detached
+  # `node loader.js` that install/web.js spawns on completion — no --config, and
+  # on the port this script is about to bind — with a no-op; the forum is
+  # started below like any other boot.
+  launchCmd=true /usr/src/app/nodebb "$NODEBB_INIT_VERB" --config="$CONFIG"
+  if [ ! -f "$CONFIG" ]; then
+    echo "Error: installer exited without writing $CONFIG. Exiting..." >&2
+    exit 1
+  fi
+  # Setup built the assets and initialised the schema for this image. Recording
+  # the hash now spares the second build the upgrade gate would otherwise run.
+  echo -n "$package_hash" > "$CONFIG_DIR/install_hash.md5"
+fi
+
 if [ "$package_hash" != "$(cat "$CONFIG_DIR/install_hash.md5" 2>/dev/null || true)" ]; then
   echo "NodeBB image changed. Upgrading (schema + assets)..."
   # Two things here are load-bearing and must not be "simplified": `-s -b` rather

@@ -8,7 +8,8 @@
 
 set -euo pipefail
 
-CONFIG="${CONFIG:-/opt/config/config.json}"
+CONFIG_DIR="${CONFIG_DIR:-/opt/config}"
+CONFIG="${CONFIG:-$CONFIG_DIR/config.json}"
 
 if [ -f "$CONFIG" ]; then
   echo "setup: $CONFIG already exists, nothing to do."
@@ -51,5 +52,10 @@ process.stdout.write(JSON.stringify({
 
 cd /usr/src/app
 ./nodebb setup "$setup_json" --config="$CONFIG"
+
+# Setup already built the assets and initialised the schema for this image.
+# Record the hash the entrypoint gates on, or the forum's first start would run
+# `nodebb upgrade -s -b` and build everything a second time.
+md5sum /usr/src/app/install/package.json | head -c 32 > "$CONFIG_DIR/install_hash.md5"
 
 echo "setup: done. config.json written to $CONFIG"
