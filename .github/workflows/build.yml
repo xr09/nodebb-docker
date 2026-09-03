@@ -1,19 +1,28 @@
 name: build image and push to GHCR
 
 on:
-  # Skip doc-only changes
+  # Skip changes to files that never enter the image: docs, and the example
+  # deployment, which .dockerignore drops from the context.
   push:
     branches: [main]
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - 'LICENSE'
+      - 'compose.yaml'
+      - 'setup.sh'
+      - '.env.example'
+      - '.gitignore'
   pull_request:
     branches: [main]
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - 'LICENSE'
+      - 'compose.yaml'
+      - 'setup.sh'
+      - '.env.example'
+      - '.gitignore'
   # Weekly rebuild so the node:lts base picks up security fixes
   schedule:
     - cron: "0 0 * * 0"

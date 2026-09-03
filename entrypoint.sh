@@ -9,8 +9,8 @@
 set -euo pipefail
 
 CONFIG_DIR="${CONFIG_DIR:-/opt/config}"
-# Exported, not just set: `npm start -- --config=...` is not enough. loader.js
-# resolves the config file from $CONFIG alone (`process.env.CONFIG ||
+# Exported, not just set: `--config=...` on the command line is not enough.
+# loader.js resolves the config file from $CONFIG alone (`process.env.CONFIG ||
 # 'config.json'`) and forks app.js with no arguments, so without the export both
 # look for /usr/src/app/config.json, find nothing, and launch the web installer
 # on top of a fully installed forum.
@@ -72,8 +72,10 @@ if [ "$package_hash" != "$(cat "$CONFIG_DIR/install_hash.md5" 2>/dev/null || tru
   # Two things here are load-bearing and must not be "simplified": `-s -b` rather
   # than a bare `nodebb upgrade`, and gating on the banner rather than the exit
   # code, which is 0 even when a step fails.
+  # `|| true` because of pipefail: a non-zero exit would end the script here,
+  # before the message below. The exit code is not the signal anyway.
   upgrade_log=$(mktemp)
-  /usr/src/app/nodebb upgrade -s -b --config="$CONFIG" 2>&1 | tee "$upgrade_log"
+  /usr/src/app/nodebb upgrade -s -b --config="$CONFIG" 2>&1 | tee "$upgrade_log" || true
   if ! grep -q 'NodeBB Upgrade Complete' "$upgrade_log"; then
     rm -f "$upgrade_log"
     echo "Failed to upgrade NodeBB. Exiting..." >&2
@@ -92,5 +94,7 @@ else
 fi
 
 # exec so that SIGTERM from `docker stop` reaches NodeBB rather than a bash frame
-# that will not forward it. tini is PID 1.
-exec npm start -- --config="$CONFIG" --no-silent --no-daemon
+# that will not forward it. tini is PID 1. loader.js directly, which is all
+# `npm start` runs: no npm process in the tree, and no `nodebb start`, whose
+# CLI preflight can shell out to npm.
+exec node /usr/src/app/loader.js --config="$CONFIG" --no-silent --no-daemon

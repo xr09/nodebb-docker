@@ -212,7 +212,8 @@ shelling out to npm. This sits in front of `nodebb upgrade`, so it is on the boo
 path whenever the image version moves. It stays a no-op only because the build
 copies `install/package.json` to `package.json` and installs from that same file,
 making the versions agree by construction. `loader.js` and `app.js` have no such
-preflight, which is why the forum itself is started with `npm start`.
+preflight, which is why the forum itself is started with `node loader.js` — the
+whole of what `npm start` runs — and not `nodebb start`.
 
 **`nodebb upgrade` exits 0 when a step fails.** A database that is unset or
 unreachable logs `Database type not set!`, the schema step never runs, and the
@@ -311,11 +312,13 @@ the host side of a port mapping ever moves.
 
 ### Signal handling
 
-The last line is `exec npm start`, where upstream uses a plain
-`npm start ... || exit 1`. `tini` runs as PID 1, so `exec` makes npm its direct
-child and a `SIGTERM` from `docker stop` reaches NodeBB. Without it the signal
-would land on a bash frame that does not forward it, and every stop would wait
-out the timeout and then kill the forum.
+The last line is `exec node loader.js`, where upstream uses a plain
+`npm start ... || exit 1`. `tini` runs as PID 1, so `exec` makes the loader its
+direct child and a `SIGTERM` from `docker stop` reaches it; `loader.js` handles
+`SIGTERM` by killing its workers. Without the `exec` the signal would land on a
+bash frame that does not forward it, and every stop would wait out the timeout
+and then kill the forum. Running the loader directly rather than through
+`npm start` also keeps npm, and its own signal forwarding, out of the tree.
 
 ## What upstream's entrypoint does
 

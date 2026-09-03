@@ -32,7 +32,7 @@ WORKDIR /usr/src/app/
 # tini is copied into the final stage; git is needed for the clone.
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get -y --no-install-recommends install \
-        tini git ca-certificates \
+        tini git \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1001 ${USER} \
     && useradd --uid 1001 --gid 1001 \
@@ -45,7 +45,8 @@ USER 1001
 # --depth 1 on a tag: that release, not its history.
 RUN git clone --depth 1 --branch ${NODEBB_VERSION} \
         https://github.com/NodeBB/NodeBB.git . \
-    && rm -rf .git
+    && rm -rf .[!.]* test logs commitlint.config.js nodebb.bat renovate.json \
+        ./*.yml ./*.md Dockerfile dev.Dockerfile Gruntfile.js eslint.config.mjs
 
 # NodeBB's real dependency manifest lives in install/, not at the root.
 RUN cp /usr/src/app/install/package.json /usr/src/app/package.json
@@ -78,6 +79,7 @@ LABEL org.opencontainers.image.title="nodebb" \
       org.opencontainers.image.description="NodeBB forum, built from source" \
       org.opencontainers.image.source="https://github.com/xr09/nodebb-docker" \
       org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${NODEBB_VERSION}" \
       org.nodebb.version="${NODEBB_VERSION}" \
       org.nodebb.plugins="${PLUGINS}"
 
