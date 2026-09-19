@@ -40,7 +40,7 @@ on different images.
 
 Without `--build`, compose reuses whatever `nodebb-docker:local` already is. To
 deploy a published tag instead, replace the `build:` block with
-`image: ghcr.io/xr09/nodebb-docker:4.15.2`.
+`image: ghcr.io/xr09/nodebb-docker:4.16.0`.
 
 ### Readiness
 
